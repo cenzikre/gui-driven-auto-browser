@@ -128,6 +128,14 @@
       <input type="number" id="clickY" placeholder="y (0-1)" step="0.01" min="0" max="1" style="width: 30%;">
       <button onclick="clickMouse()">Click</button>
     </div>
+
+    <!-- Scroll Action -->
+    <div class="action-block">
+      <p><strong>Scroll</strong></p>
+      <input type="number" id="scrollX" placeholder="delta x" step="1" value="0" style="width: 30%;">
+      <input type="number" id="scrollY" placeholder="delta y" step="1" value="0" style="width: 30%;">
+      <button onclick="windowScroll()">Scroll</button>
+    </div>
   </div>
 
   <!-- Middle column: Image and coordinate tracker -->
@@ -331,6 +339,36 @@
     // Clear inputs
     document.getElementById('clickX').value = "";
     document.getElementById('clickY').value = "";
+  }
+
+  // Scroll Action
+  async function windowScroll() {
+    const deltaX = parseFloat(document.getElementById('scrollX').value);
+    const deltaY = parseFloat(document.getElementById('scrollY').value);
+    
+    if (isNaN(deltaX) || isNaN(deltaY)) {
+      alert("Please enter valid delta x and delta y values.");
+      return;
+    }
+
+    try {
+      const res = await fetch('/scroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delta_x: deltaX, delta_y: deltaY })
+      });
+      const data = await res.json();
+      alert(data.status || "Scrolled");
+      refreshScreenshots();
+      preview.src = `/screenshots/${data.screenshot}`;
+    } catch (error) {
+      alert(`Error scrolling: ${error.message}`);  // Show the actual error message
+      console.error("Full error details:", error);  // Log full error details to console
+    }
+
+    // Clear inputs
+    document.getElementById('scrollX').value = "0";
+    document.getElementById('scrollY').value = "0";
   }
 </script>
 

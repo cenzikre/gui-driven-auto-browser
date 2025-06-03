@@ -45,7 +45,9 @@ class ClickRequest(BaseModel):
 class GetScreenshotRequest(BaseModel):
     wait_time: float = 1.0
 
-
+class ScrollRequest(BaseModel):
+    delta_x: float
+    delta_y: float
 
 
 # helper functions
@@ -212,6 +214,17 @@ async def click_mouse(request: ClickRequest):
             "status": f"Mouse clicked at ({x:.2f},{y:.2f})",
             "screenshot": screenshot_path
         }
+    
+
+@app.post("/scroll")
+async def scroll(request: ScrollRequest):
+    global _page
+    await _page.mouse.wheel(request.delta_x, request.delta_y)
+    screenshot_path = await get_screenshot("scroll")
+    return {
+        "status": f"scrolled {request.delta_x} {request.delta_y}", 
+        "screenshot": screenshot_path
+    }
 
 
 # @app.on_event("shutdown")
