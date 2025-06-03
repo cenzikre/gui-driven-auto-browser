@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Manual Browser Controler</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+
+    header {
+      text-align: center;
+      padding: 20px;
+      font-size: 24px;
+      font-weight: bold;
+      background-color: #f0f0f0;
+      border-bottom: 1px solid #ccc;
+    }
+
+    .container {
+      display: flex;
+      height: calc(100vh - 70px); /* subtract header height */
+    }
+
+    .left, .middle, .right {
+      padding: 10px;
+      overflow-y: auto;
+    }
+
+    .left {
+      width: 20%;
+      border-right: 1px solid #ccc;
+      background-color: #fafafa;
+    }
+
+    .middle {
+      width: 60%;
+      text-align: center;
+    }
+
+    .right {
+      width: 20%;
+      border-left: 1px solid #ccc;
+      background-color: #fafafa;
+    }
+
+    .action-block {
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background-color: #f9f9f9;
+    }
+
+    .action-block p {
+      margin: 0 0 8px;
+      font-weight: bold;
+    }
+
+    #preview {
+      max-width: 100%;
+      max-height: 80vh;
+      border: 2px dashed #aaa;
+    }
+
+    #coords {
+      margin-top: 10px;
+      font-size: 18px;
+    }
+
+    #screenshotList {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    #screenshotList li {
+      cursor: pointer;
+      padding: 4px;
+      margin: 4px 0;
+      background: #eaeaea;
+      border-radius: 4px;
+    }
+
+    #screenshotList li:hover {
+      background: #d0d0d0;
+    }
+  </style>
+</head>
+<body>
+
+<header>Manual Browser Controler</header>
+
+<div class="container">
+  <!-- Left column: Action buttons (to be added later) -->
+  <div class="left">
+    <!-- Placeholder -->
+    <p><strong>Actions Panel</strong></p>
+
+    <!-- Take Screenshot Action-->
+    <div class="action-block">
+      <p><strong>Take Screenshot</strong></p>
+      <input type="number" id="waitTime" placeholder="wait time (sec)" step="0.1" min="0" value="0" style="width: 15%;">
+      <button onclick="takeScreenshot()">Capture</button>
+    </div>
+
+    <!-- Go To Action -->
+    <div class="action-block">
+      <p><strong>Go To</strong></p>
+      <input type="text" id="gotoUrl" placeholder="Enter URL" style="width: 100%; margin-bottom: 6px;">
+      <button onclick="goToUrl()">Go</button>
+    </div>
+
+    <!-- Move Mouse Action -->
+    <div class="action-block">
+      <p><strong>Move Mouse To</strong></p>
+      <input type="number" id="moveX" placeholder="x (0-1)" step="0.01" min="0" max="1" style="width: 30%;">
+      <input type="number" id="moveY" placeholder="y (0-1)" step="0.01" min="0" max="1" style="width: 30%;">
+      <input type="number" id="moveStep" placeholder="step" step="1" min="1" value="1" style="width: 30%;"><br><br>
+      <button onclick="moveMouse()">Move</button>
+    </div>
+
+    <!-- Click Mouse Action -->
+    <div class="action-block">
+      <p><strong>Click Mouse At</strong></p>
+      <input type="number" id="clickX" placeholder="x (0-1)" step="0.01" min="0" max="1" style="width: 30%;">
+      <input type="number" id="clickY" placeholder="y (0-1)" step="0.01" min="0" max="1" style="width: 30%;">
+      <button onclick="clickMouse()">Click</button>
+    </div>
+  </div>
+
+  <!-- Middle column: Image and coordinate tracker -->
+  <div class="middle">
+    <input type="file" accept="image/*" id="fileInput"><br><br>
+    <img id="preview" src="" alt="Image will appear here">
+    <div id="coords">Coordinates: (x, y)</div>
+  </div>
+
+  <!-- Right column: Screenshot list (to be implemented) -->
+  <div class="right">
+    <p><strong>Screenshot List</strong></p>
+    <div style="margin-bottom: 10px;">
+      <button onclick="refreshScreenshots()">🔄 Refresh</button>
+      <button onclick="clearScreenshots()">🗑️ Delete All</button>
+    </div>
+    <ul id="screenshotList"></ul>
+  </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const preview = document.getElementById('preview');
+  const coords = document.getElementById('coords');
+  const screenshotList = document.getElementById('screenshotList');
+
+  // Load image
+  fileInput.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+      preview.src = URL.createObjectURL(file);
+    }
+  });
+
+  // Track cursor
+  preview.addEventListener('mousemove', (event) => {
+    const rect = preview.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+    coords.textContent = `Coordinates: (${x.toFixed(3)}, ${y.toFixed(3)})`;
+  });
+
+  // Fetch screenshot list
+  async function refreshScreenshots() {
+    screenshotList.innerHTML = "<li>Loading...</li>";
+    try {
+      const res = await fetch('/screenshot_list');
+      const data = await res.json();
+      screenshotList.innerHTML = "";
+
+      if (data.screenshots && data.screenshots.length > 0) {
+        data.screenshots.forEach(file => {
+          const li = document.createElement('li');
+          li.textContent = file;
+          li.onclick = () => {
+            preview.src = `/screenshots/${file}`; // ✅ Show image in preview
+          };
+          screenshotList.appendChild(li);
+        });
+      } else {
+        screenshotList.innerHTML = "<li>No screenshots</li>";
+      }
+    } catch (error) {
+      screenshotList.innerHTML = "<li>Error loading screenshots</li>";
+      console.error(error);
+    }
+  }
+  refreshScreenshots();
+
+  // Take Screenshot Action
+  async function takeScreenshot() {
+    const waitTime = parseFloat(document.getElementById('waitTime').value);
+    if (isNaN(waitTime) || waitTime < 0) {
+      alert("Please enter a valid wait time (sec)");
+      return;
+    }
+    try {
+      const res = await fetch('/take_screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wait_time: waitTime })
+      });
+      const data = await res.json();
+      alert(data.status || "Screenshot taken");
+      refreshScreenshots();
+    } catch (error) {
+      alert("Error taking screenshot");
+      console.error(error);
+    }
+  }
+
+  // Clear Screenshots Action
+  async function clearScreenshots() {
+    if (!confirm("Are you sure you want to delete all screenshots?")) return;
+
+    try {
+      const res = await fetch('/clear_screenshots');
+      const data = await res.json();
+      alert(data.status || "Screenshots cleared");
+      refreshScreenshots();  // 🔄 Refresh the list after deletion
+      preview.src = "";      // Clear preview image
+      coords.textContent = "Coordinates: (x, y)";
+    } catch (error) {
+      alert("Error clearing screenshots");
+      console.error(error);
+    }
+  }
+
+  // Go To Action
+  async function goToUrl() {
+    const urlInput = document.getElementById('gotoUrl');
+    let url = urlInput.value.trim();
+
+    if (!url) {
+      alert("Please enter a URL.");
+      return;
+    }
+
+    // Auto-prefix with https:// if missing
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = "https://" + url;
+    }
+
+    try {
+      const res = await fetch('/goto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url })
+      });
+
+      const data = await res.json();
+      alert(data.status || "Navigation complete");
+      refreshScreenshots();
+      preview.src = `/screenshots/${data.screenshot}`;
+
+      // Clean input box after success
+      urlInput.value = "";
+    } catch (error) {
+      alert("Failed to navigate");
+      console.error(error);
+    }
+  }
+
+  // Move Mouse Action
+  async function moveMouse() {
+    const x = parseFloat(document.getElementById('moveX').value);
+    const y = parseFloat(document.getElementById('moveY').value);
+    const step = parseInt(document.getElementById('moveStep').value) || 1;
+
+    if (isNaN(x) || isNaN(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+      alert("Please enter valid x and y values between 0 and 1.");
+      return;
+    }
+
+    try {
+      const res = await fetch('/move_mouse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: x, y: y, step: step })
+      });
+      const data = await res.json();
+      alert(data.status || "Mouse moved");
+      refreshScreenshots();
+      preview.src = `/screenshots/${data.screenshot}`;
+    } catch (error) {
+      alert("Error moving mouse");
+      console.error(error);
+    }
+
+    // Clear inputs
+    document.getElementById('moveX').value = "";
+    document.getElementById('moveY').value = "";
+    document.getElementById('moveStep').value = "1";  // Reset to default
+  }
+
+  // Click Mouse Action
+  async function clickMouse() {
+    const x = parseFloat(document.getElementById('clickX').value);
+    const y = parseFloat(document.getElementById('clickY').value);
+
+    if (isNaN(x) || isNaN(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+      alert("Please enter valid x and y values between 0 and 1.");
+      return;
+    }
+
+    try {
+      const res = await fetch('/click_mouse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: x, y: y })
+      });
+      const data = await res.json();
+      alert(data.status || "Mouse clicked");
+      refreshScreenshots();
+      preview.src = `/screenshots/${data.screenshot}`;
+    } catch (error) {
+      alert("Error clicking mouse");
+      console.error(error);
+    }
+
+    // Clear inputs
+    document.getElementById('clickX').value = "";
+    document.getElementById('clickY').value = "";
+  }
+</script>
+
+</body>
+</html>

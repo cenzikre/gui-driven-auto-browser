@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Image Coordinate Tracker</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 40px; }
+    #preview { max-width: 90%; max-height: 80vh; border: 2px dashed #aaa; margin: 20px auto; display: block; }
+    #coords { margin-top: 10px; font-size: 18px; }
+  </style>
+</head>
+<body>
+
+<h2>Drag and Drop an Image</h2>
+<input type="file" accept="image/*" id="fileInput"><br>
+<img id="preview" src="" alt="Image will appear here">
+<div id="coords">Coordinates: (x, y)</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const preview = document.getElementById('preview');
+  const coords = document.getElementById('coords');
+
+  // Handle image upload
+  fileInput.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+      preview.src = URL.createObjectURL(file);
+    }
+  });
+
+  // Track mouse movement over the image
+  preview.addEventListener('mousemove', (event) => {
+    const rect = preview.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+    coords.textContent = `Coordinates: (${x.toFixed(3)}, ${y.toFixed(3)})`;
+  });
+</script>
+
+</body>
+</html>
