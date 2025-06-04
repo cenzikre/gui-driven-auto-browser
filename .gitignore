@@ -37,6 +37,8 @@ screenshots/
 fastapi/
 backup/
 *.log 
+.env
+environment.yaml
 
 # Notebook
 *.ipynb
