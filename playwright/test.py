@@ -49,6 +49,11 @@ class ScrollRequest(BaseModel):
     delta_x: float
     delta_y: float
 
+class TypeAtRequest(BaseModel):
+    x: float
+    y: float
+    text: str
+
 
 # helper functions
 
@@ -226,6 +231,23 @@ async def scroll(request: ScrollRequest):
         "screenshot": screenshot_path
     }
 
+
+@app.post("/type_at")
+async def type_at(request: TypeAtRequest):
+    global _page
+
+    w, h = get_viewport_size(_page)
+    x = request.x * w
+    y = request.y * h
+
+    await _page.mouse.click(x, y)
+    await _page.keyboard.type(request.text)
+    screenshot_path = await get_screenshot("type_at")
+
+    return {
+        "status": f"typed {request.text} at {x:.2f}, {y:.2f}", 
+        "screenshot": screenshot_path
+    }
 
 # @app.on_event("shutdown")
 # async def shutdown_browser():

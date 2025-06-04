@@ -117,7 +117,7 @@
       <p><strong>Move Mouse To</strong></p>
       <input type="number" id="moveX" placeholder="x (0-1)" step="0.01" min="0" max="1" style="width: 30%;">
       <input type="number" id="moveY" placeholder="y (0-1)" step="0.01" min="0" max="1" style="width: 30%;">
-      <input type="number" id="moveStep" placeholder="step" step="1" min="1" value="1" style="width: 30%;"><br><br>
+      <input type="number" id="moveStep" placeholder="step" step="1" min="1" value="1" style="width: 30%; margin-bottom: 6px;">
       <button onclick="moveMouse()">Move</button>
     </div>
 
@@ -135,6 +135,15 @@
       <input type="number" id="scrollX" placeholder="delta x" step="1" value="0" style="width: 30%;">
       <input type="number" id="scrollY" placeholder="delta y" step="1" value="0" style="width: 30%;">
       <button onclick="windowScroll()">Scroll</button>
+    </div>
+
+    <!-- Type At Action -->
+    <div class="action-block">
+      <p><strong>Type At</strong></p>
+      <input type="number" id="typeX" placeholder="x (0-1)" step="0.01" min="0" max="1" style="width: 15%; margin-bottom: 6px;">
+      <input type="number" id="typeY" placeholder="y (0-1)" step="0.01" min="0" max="1" style="width: 15%; margin-bottom: 6px;">
+      <input type="text" id="typeText" placeholder="Enter text inputs" style="width: 70%; margin-bottom: 6px;">
+      <button onclick="typeAt()">Type</button>
     </div>
   </div>
 
@@ -369,6 +378,38 @@
     // Clear inputs
     document.getElementById('scrollX').value = "0";
     document.getElementById('scrollY').value = "0";
+  }
+
+  // Type At Action
+  async function typeAt() {
+    const x = parseFloat(document.getElementById('typeX').value);
+    const y = parseFloat(document.getElementById('typeY').value);
+    const text = document.getElementById('typeText').value.trim();
+    
+    if (isNaN(x) || isNaN(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+      alert("Please enter valid x and y values between 0 and 1.");
+      return;
+    }
+
+    try {
+      const res = await fetch('/type_at', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: x, y: y, text: text })
+      });
+      const data = await res.json();
+      alert(data.status || "Typed text");
+      refreshScreenshots();
+      preview.src = `/screenshots/${data.screenshot}`;
+    } catch (error) {
+      alert("Error typing text");
+      console.error(error);
+    }
+
+    // Clear inputs
+    document.getElementById('typeX').value = "";
+    document.getElementById('typeY').value = "";
+    document.getElementById('typeText').value = "";
   }
 </script>
 
