@@ -30,6 +30,7 @@ ENV/
 .vscode/
 *.swp
 *.swo
+*.code-workspace
 
 # Project specific
 screenshots/
