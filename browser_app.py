@@ -16,9 +16,9 @@ _context = None
 _page = None
 _session = None
 
-_screenshot_dir = "screenshots"
+_screenshot_dir = "playwright/screenshots"
 app.mount("/screenshots", StaticFiles(directory=_screenshot_dir), name="screenshots")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory="playwright/static"), name="static")
 
 
 # API request models
