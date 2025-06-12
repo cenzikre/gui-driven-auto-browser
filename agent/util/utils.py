@@ -1,5 +1,7 @@
-import requests, base64
+import requests, base64, io
 from pathlib import Path
+from typing import Union
+from PIL import Image
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, AnyMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -48,9 +50,16 @@ For every response, beside answering directly question, and generating tool call
 """)
 
 
-def encode_image_to_base64(image_path: str) -> str:
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
+def encode_image_to_base64(image: Union[str, Image.Image]) -> str:
+    if isinstance(image, str):
+        with open(image, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    elif isinstance(image, Image.Image):
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+    else:
+        raise ValueError(f"Invalid image type: {type(image)}")
     
 def openai_image_payload_format(text: str, image_str: str) -> list[dict]:
     return [

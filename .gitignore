@@ -39,6 +39,7 @@ backup/
 *.log 
 .env
 environment.yaml
+version_check.py
 
 # Notebook
 *.ipynb
