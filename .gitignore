@@ -40,6 +40,7 @@ backup/
 .env
 environment.yaml
 version_check.py
+model_weights/
 
 # Notebook
 *.ipynb
