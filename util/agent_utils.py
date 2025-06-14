@@ -1,17 +1,17 @@
 import requests, base64, io
 from pathlib import Path
-from typing import Union, Annotated
+from typing import Annotated
+from typing_extensions import TypedDict
 from PIL import Image
-from omni.util.utils import IconDetectRequest
+from util.api_models import IconDetectRequest
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, AnyMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.prebuilt.tool_node import InjectedState
-from langgraph.graph import MessagesState
 
 
-root = Path(__file__).parent.parent.parent
-screenshot_dir = root / "play_wright" / "screenshots"
+root = Path(__file__).parent.parent
+screenshot_dir = root / "screenshots"
 browser_api_url = "http://127.0.0.1:8000"
 yolo_api_url = "http://127.0.0.1:8001"
 
@@ -58,22 +58,6 @@ For every response, beside answering directly question, and generating tool call
 """)
 
 
-class AgentState(MessagesState):
-    image_path: str = ""
-    box_centers: list[list[float]] = []
-
-
-def encode_image_to_base64(image: Union[str, Image.Image]) -> str:
-    if isinstance(image, str):
-        with open(image, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    elif isinstance(image, Image.Image):
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
-    else:
-        raise ValueError(f"Invalid image type: {type(image)}")
-    
 def openai_image_payload_format(text: str, image_str: str) -> list[dict]:
     return [
         {"type": "text", "text": text},
@@ -94,6 +78,16 @@ def drop_image_string(message: AnyMessage) -> AnyMessage:
     filtered = [part for part in message.content if part.get("type") != "image_url"]
     return message.model_copy(update={"content": filtered})
 
+def image_reducer(old: list[AnyMessage], new: list[AnyMessage]) -> list[AnyMessage]:
+    if old and has_image_string(old[-1]):
+        old[-1] = drop_image_string(old[-1])
+    return old + new
+
+def image_reducer2(old: list[AnyMessage], new: list[AnyMessage]) -> list[AnyMessage]:
+    if len(old) == 0:
+        return old + new
+    return [old[0]] + new
+
 def annotate_image(image_str: str) -> Image.Image:
     payload = IconDetectRequest(source = image_str)
     response = requests.post(f"{yolo_api_url}/detect_icon", json=payload.model_dump())
@@ -106,6 +100,12 @@ def call_action_endpoint_function(endpoint_name: str, **kwargs) -> list[dict]:
     screenshot_path = screenshot_dir / response_json["screenshot"]
     response_json["screenshot"] = screenshot_path.as_posix()
     return response_json
+
+
+class AgentState(TypedDict):
+    messages: Annotated[list[AnyMessage], image_reducer]
+    image_path: str = ""
+    box_centers: list[list[float]] = []
 
 
 @tool

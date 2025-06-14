@@ -1,12 +1,13 @@
-import uvicorn, os, gc, torch, requests, base64
+import uvicorn, gc, torch, requests, base64
 import numpy as np
 import supervision as sv
 from fastapi import FastAPI, HTTPException
 from ultralytics import YOLO
 from PIL import Image
 from pathlib import Path
-from omni.util.utils import BoxAnnotator, get_xyxy_box_center, classify_image_string, encode_image_to_base64
-from omni.util.utils import IconDetectRequest, IconDetectResponse
+from util.image_utils import classify_image_string, encode_image_to_base64
+from util.omni_utils import BoxAnnotator, get_xyxy_box_center
+from util.api_models import IconDetectRequest, IconDetectResponse
 from dotenv import load_dotenv
 from io import BytesIO
 
@@ -15,15 +16,9 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 load_dotenv()
 
-# Check required environment variables
-required_env_vars = ['ROOT_DIR', 'MODEL_DIR']
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-root_dir = Path(__file__).parent.parent
-model_dir = root_dir / 'OmniParser' / 'OmniParser' / 'weights' / 'icon_detect' / 'model.pt'
-image_dir = root_dir / 'ui-auto-tools' / 'play_wright' / 'screenshots'
+root_dir = Path(__file__).parent
+model_dir = root_dir / 'model_weights' / 'icon_detect' / 'model.pt'
+image_dir = root_dir / 'screenshots'
 
 # print("Root dir:", root_dir)
 # print("Model dir:", model_dir)

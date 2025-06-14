@@ -41,6 +41,7 @@ backup/
 environment.yaml
 version_check.py
 model_weights/
+task_prompt.py
 
 # Notebook
 *.ipynb

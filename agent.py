@@ -2,10 +2,12 @@ import json
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import ToolMessage, HumanMessage
-from langgraph.graph import START, StateGraph, END, MessagesState
+from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import tools_condition, ToolNode
-from agent.util.utils import call_action_endpoint, task_msg_template, system_msg, drop_image_string, has_image_string
-from agent.util.utils import openai_image_payload_format, encode_image_to_base64, AgentState
+from util.agent_utils import call_action_endpoint, task_msg_template, system_msg, drop_image_string, has_image_string
+from util.agent_utils import openai_image_payload_format, AgentState
+from util.image_utils import encode_image_to_base64
+from task_prompt import task_prompt
 
 load_dotenv()
 
@@ -38,12 +40,10 @@ g.add_edge(START, "assistant")
 g.add_conditional_edges("assistant", tools_condition, "tools")
 g.add_edge("tools", "attach_image")
 g.add_edge("attach_image", "assistant")
-# g.add_edge("tools", END)
 
 graph = g.compile()
 
 
-task_prompt = "Go to https://www.google.com then go to gmail"
 task_msg = task_msg_template.format_messages(task_instructions=task_prompt)
 
 response = graph.invoke({"messages": [system_msg, *task_msg], "image_path": "", "box_centers": []})
