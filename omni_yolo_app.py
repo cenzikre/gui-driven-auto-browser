@@ -5,22 +5,13 @@ from fastapi import FastAPI, HTTPException
 from ultralytics import YOLO
 from PIL import Image
 from pathlib import Path
-from pydantic import BaseModel
 from omni.util.utils import BoxAnnotator, get_xyxy_box_center, classify_image_string, encode_image_to_base64
+from omni.util.utils import IconDetectRequest, IconDetectResponse
 from dotenv import load_dotenv
 from io import BytesIO
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-class IconDetectRequest(BaseModel):
-    source: str
-    conf: float = 0.05
-    iou: float = 0.1
-
-class IconDetectResponse(BaseModel):
-    centers: list[list[float]]
-    image: str
 
 load_dotenv()
 
@@ -32,7 +23,7 @@ if missing_vars:
 
 root_dir = Path(__file__).parent.parent
 model_dir = root_dir / 'OmniParser' / 'OmniParser' / 'weights' / 'icon_detect' / 'model.pt'
-image_dir = root_dir / 'ui-auto-tools' / 'Playwright' / 'screenshots'
+image_dir = root_dir / 'ui-auto-tools' / 'play_wright' / 'screenshots'
 
 # print("Root dir:", root_dir)
 # print("Model dir:", model_dir)
@@ -88,6 +79,7 @@ def load_image(source: str) -> tuple[Image.Image, np.ndarray]:
         elif image_type == "file":
             # Handle local file path
             path = image_dir / source
+            print("path:", path)
             if not path.exists():
                 raise FileNotFoundError(f"Image file not found at {path}")
             image = Image.open(path)
@@ -153,7 +145,7 @@ def detect_icon(request: IconDetectRequest) -> tuple[Image.Image, np.ndarray]:
             return Image.fromarray(image_arr), []
         
         # Get the centers of the boxes (x, y)
-        centers = get_xyxy_box_center(boxes)
+        centers = get_xyxy_box_center(boxes) / np.array([w, h])
         annotated_image = annotate_image(image_arr, boxes, draw_bbox_config)
         
         # Clean up only the tensors we created in this request
@@ -167,6 +159,7 @@ def detect_icon(request: IconDetectRequest) -> tuple[Image.Image, np.ndarray]:
 
 @app.post("/detect_icon", response_model=IconDetectResponse)
 async def detect_icon_endpoint(request: IconDetectRequest):
+    print("request:", request)
     try:
         annotated_image, centers = detect_icon(request)
         encoded_image = encode_image_to_base64(annotated_image)

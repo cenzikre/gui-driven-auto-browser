@@ -4,10 +4,20 @@ from urllib.parse import urlparse
 import cv2, os, re, base64, io
 import numpy as np
 from PIL import Image
-
+from pydantic import BaseModel
 from supervision.detection.core import Detections
 from supervision.draw.color import Color, ColorPalette
 
+
+class IconDetectRequest(BaseModel):
+    source: str
+    conf: float = 0.05
+    iou: float = 0.1
+
+class IconDetectResponse(BaseModel):
+    centers: list[list[float]]
+    image: str
+    
 
 class BoxAnnotator:
     """
