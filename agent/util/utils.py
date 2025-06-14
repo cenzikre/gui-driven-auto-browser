@@ -1,14 +1,19 @@
 import requests, base64, io
 from pathlib import Path
-from typing import Union
+from typing import Union, Annotated
 from PIL import Image
+from omni.util.utils import IconDetectRequest
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, AnyMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langgraph.prebuilt.tool_node import InjectedState
+from langgraph.graph import MessagesState
+
 
 root = Path(__file__).parent.parent.parent
-screenshot_dir = root / "playwright" / "screenshots"
-api_url = "http://127.0.0.1:8000"
+screenshot_dir = root / "play_wright" / "screenshots"
+browser_api_url = "http://127.0.0.1:8000"
+yolo_api_url = "http://127.0.0.1:8001"
 
 system_msg = SystemMessage(content="""
 You are a helpful assistant that help human with browser automation tasks. 
@@ -22,15 +27,18 @@ You are going to be given a task instructions related to web page interactions, 
 Through a set of tools provided to you, you can interact with a web browser to:
     - navigate to a specific url
     - see the browser viewport by taking screenshots
+    - interactable elements in the screenshots will be annotated with bounding boxes and indexes, 
+      and you can pick the index of the element you want to interact with by their indexes
                            
 Then based on what you see, you can:
-    - move the mouse to a specific coordinate
-    - click the mouse at a specific coordinate
+    - move the mouse to a specific interactive box
+    - click the mouse at a specific interactive box
     - scroll the mouse horizontally and vertically
-    - type text at a specific coordinate
+    - type text at a specific interactive box
 
 1 second after executing an action, a auto screenshot of the browser viewport will be taken to try to capture the effect of your action.
 You can also manually set wait time and take screenshot if the auto screenshot is showing loading web page.
+Interactable elements in the screenshots will be annotated with bounding boxes and indexes.
 Based on the information, you can plan your next move. 
 Repeat the process until the task is completed.
 """)
@@ -48,6 +56,11 @@ For every response, beside answering directly question, and generating tool call
     Action:
         - What you want to do for the next step
 """)
+
+
+class AgentState(MessagesState):
+    image_path: str = ""
+    box_centers: list[list[float]] = []
 
 
 def encode_image_to_base64(image: Union[str, Image.Image]) -> str:
@@ -81,9 +94,14 @@ def drop_image_string(message: AnyMessage) -> AnyMessage:
     filtered = [part for part in message.content if part.get("type") != "image_url"]
     return message.model_copy(update={"content": filtered})
 
+def annotate_image(image_str: str) -> Image.Image:
+    payload = IconDetectRequest(source = image_str)
+    response = requests.post(f"{yolo_api_url}/detect_icon", json=payload.model_dump())
+    return response
+
 def call_action_endpoint_function(endpoint_name: str, **kwargs) -> list[dict]:
     request = {**kwargs}
-    response = requests.post(f"{api_url}/{endpoint_name}", json=request)
+    response = requests.post(f"{browser_api_url}/{endpoint_name}", json=request)
     response_json = response.json()
     screenshot_path = screenshot_dir / response_json["screenshot"]
     response_json["screenshot"] = screenshot_path.as_posix()
@@ -91,10 +109,11 @@ def call_action_endpoint_function(endpoint_name: str, **kwargs) -> list[dict]:
 
 
 @tool
-def call_action_endpoint(endpoint_name: str, params: dict) -> list[dict]:
+def call_action_endpoint(endpoint_name: str, params: dict, state: Annotated[AgentState, InjectedState]) -> list[dict]:
     """
     Call an action endpoint by providing corresponding parameters to execute a browser action;
-    A screenshot of the browser viewport will be taken after the action is executed, and returned to the agent
+    A screenshot of the browser viewport will be taken after the action is executed, all interactive elements will be annotated 
+    and returned to the agent.
     
     Args:
         endpoint_name (str): The name of the action endpoint to call
@@ -108,33 +127,54 @@ def call_action_endpoint(endpoint_name: str, params: dict) -> list[dict]:
                 url (str): the url to navigate to
 
             - move_mouse: use to move the mouse to a specific coordinate
-                x (float): the relative x coordinate (0-1) to move the mouse to
-                y (float): the relative y coordinate (0-1) to move the mouse to
+                box_index (int): the index of the annotated box to move the mouse to
                 step (int = 1): the number of steps to move the mouse
 
             - click_mouse: use to click the mouse at a specific coordinate
-                x (float): the relative x coordinate (0-1) to click the mouse on
-                y (float): the relative y coordinate (0-1) to click the mouse on
+                box_index (int): the index of the annotated box to click the mouse on
 
             - scroll: use to scroll the mouse horizontally and vertically
                 delta_x (float): the amount to scroll the mouse horizontally
                 delta_y (float): the amount to scroll the mouse vertically
                 
             - type_at: use to type text at a specific coordinate
-                x (float): the relative x coordinate (0-1) to type the text at
-                y (float): the relative y coordinate (0-1) to type the text at
+                box_index (int): the index of the annotated box to type the text at
                 text (str): the text content to type
+
+        state (AgentState): the state of the agent, it will be injected to the tool, do not need to pass it in the tool call
         
-    Returns (list[dict]):
-        The payload to pass to the LLM, including:
-        - status_str: the description of the action
-        - image_str: the base64 encoded screenshot of the browser viewport after the action is executed
+    Returns (dict):
+        Response paylaod from the browser app, including:
+        - status (str): the description of the action
+        - screenshot (str): the path to the annotated screenshot of the browser viewport after the action is executed
+        - centers (list[list[float]]): the centers of the annotated boxes
     """
 
-    response = requests.post(f"{api_url}/{endpoint_name}", json=params)
+    if "box_index" in params:
+        box_index = params["box_index"]
+        request = {k: v for k, v in params.items() if k != "box_index"}
+        if box_index < 0 or box_index >= len(state["box_centers"]):
+            raise ValueError(f"Box index {box_index} is out of range, Please pick the box with valid index from the previous screenshot")
+        request["x"] = state["box_centers"][box_index][0]
+        request["y"] = state["box_centers"][box_index][1]
+    else:
+        request = params
+
+    response = requests.post(f"{browser_api_url}/{endpoint_name}", json=request)
     response_json = response.json()
     screenshot_path = screenshot_dir / response_json["screenshot"]  
-    response_json["screenshot"] = screenshot_path.as_posix()
+
+    annotated_repsonse = annotate_image(response_json["screenshot"])
+    annotated_response_json = annotated_repsonse.json()
+
+    centers = annotated_response_json['centers']
+    annotated_image_str = annotated_response_json['image']
+    annotated_image = Image.open(io.BytesIO(base64.b64decode(annotated_image_str)))
+    annotated_screenshot_path = screenshot_dir / f"annotated_{response_json['screenshot']}"
+    annotated_image.save(annotated_screenshot_path)
+
+    response_json["screenshot"] = annotated_screenshot_path.as_posix()
+    response_json["centers"] = centers
     return response_json
 
 
