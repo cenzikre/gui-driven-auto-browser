@@ -1,23 +1,9 @@
 from typing import List, Optional, Union, Tuple
-from urllib.parse import urlparse
-
-import cv2, os, re, base64, io
-import numpy as np
-from PIL import Image
-from pydantic import BaseModel
 from supervision.detection.core import Detections
 from supervision.draw.color import Color, ColorPalette
+import cv2
+import numpy as np
 
-
-class IconDetectRequest(BaseModel):
-    source: str
-    conf: float = 0.05
-    iou: float = 0.1
-
-class IconDetectResponse(BaseModel):
-    centers: list[list[float]]
-    image: str
-    
 
 class BoxAnnotator:
     """
@@ -276,47 +262,3 @@ def get_optimal_label_pos(text_padding, text_width, text_height, x1, y1, x2, y2,
 
 def get_xyxy_box_center(boxes: np.ndarray) -> np.ndarray:
     return np.stack([(boxes[:, 0] + boxes[:, 2]) / 2, (boxes[:, 1] + boxes[:, 3]) / 2], axis=1)
-
-
-def encode_image_to_base64(image: Union[str, Image.Image]) -> str:
-    if isinstance(image, str):
-        with open(image, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    elif isinstance(image, Image.Image):
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
-    else:
-        raise ValueError(f"Invalid image type: {type(image)}")
-
-
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff"}
-
-def classify_image_string(s: str) -> str:
-    """
-    Return one of: 'data_uri', 'base64', 'url', 'file', or 'unknown'
-    """
-    s = s.strip()
-
-    # 1) Data-URI (data:image/...;base64,<big blob>)
-    if s.lower().startswith("data:image/"):
-        return "data_uri"
-
-    # 2) URL (http/https) with image extension at the end
-    parsed = urlparse(s)
-    if parsed.scheme in ("http", "https"):
-        _, ext = os.path.splitext(parsed.path.lower())
-        if ext in IMAGE_EXTS:
-            return "url"
-
-    # 3) Raw base-64 blob (very long, only base64 chars)
-    base64_charset = re.fullmatch(r"[A-Za-z0-9+/=\s]+", s)
-    if base64_charset and len(s) > 100:        # length guard
-        return "base64"
-
-    # 4) Local file name / path ending with an image extension
-    _, ext = os.path.splitext(s.lower())
-    if ext in IMAGE_EXTS:
-        return "file"
-
-    return "unknown"

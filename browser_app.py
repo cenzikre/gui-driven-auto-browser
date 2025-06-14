@@ -1,13 +1,11 @@
 from playwright.async_api import async_playwright
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
+from util.api_models import GotoRequest, MoveMouseRequest, MovePathRequest, ClickRequest, GetScreenshotRequest, ScrollRequest, TypeAtRequest
 import uvicorn, asyncio, os, shutil, re
-from typing import Optional
-
 
 app = FastAPI()
 
@@ -16,43 +14,9 @@ _context = None
 _page = None
 _session = None
 
-_screenshot_dir = "play_wright/screenshots"
+_screenshot_dir = "screenshots"
 app.mount("/screenshots", StaticFiles(directory=_screenshot_dir), name="screenshots")
-app.mount("/static", StaticFiles(directory="play_wright/static"), name="static")
-
-
-# API request models
-
-class GotoRequest(BaseModel):
-    url: str
-
-class MoveMouseRequest(BaseModel):
-    x: float
-    y: float
-    step: Optional[int] = 1
-
-class MovePathRequest(BaseModel):
-    start_x: float  # normalized [0, 1]
-    start_y: float
-    end_x: float
-    end_y: float
-    steps: int = 20  # number of intermediate steps
-
-class ClickRequest(BaseModel):
-    x: float
-    y: float
-
-class GetScreenshotRequest(BaseModel):
-    wait_time: float = 1.0
-
-class ScrollRequest(BaseModel):
-    delta_x: float
-    delta_y: float
-
-class TypeAtRequest(BaseModel):
-    x: float
-    y: float
-    text: str
+app.mount("/static", StaticFiles(directory="util/static"), name="static")
 
 
 # helper functions
