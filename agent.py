@@ -5,7 +5,7 @@ from langchain_core.messages import ToolMessage, HumanMessage
 from langgraph.graph import START, StateGraph, END, MessagesState
 from langgraph.prebuilt import tools_condition, ToolNode
 from agent.util.utils import call_action_endpoint, task_msg_template, system_msg, drop_image_string, has_image_string
-from agent.util.utils import openai_image_payload_format, encode_image_to_base64
+from agent.util.utils import openai_image_payload_format, encode_image_to_base64, AgentState
 
 load_dotenv()
 
@@ -13,21 +13,24 @@ tools = [call_action_endpoint]
 tools_node = ToolNode(tools)
 llm = ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(tools)
 
-def assistant_node(state: MessagesState) -> MessagesState:
+def assistant_node(state: AgentState) -> AgentState:
     return {"messages": [llm.invoke(state["messages"])]}
 
-def attach_image_node(state: MessagesState) -> MessagesState:
+def attach_image_node(state: AgentState) -> AgentState:
     last_message = state["messages"][-1]
     content = json.loads(last_message.content)
     if isinstance(last_message, ToolMessage) and "screenshot" in content:
         image_str = encode_image_to_base64(content["screenshot"])
         text = "Here is the screenshot of the action you just took."
         message = HumanMessage(content=openai_image_payload_format(text, image_str))
-        return {"messages": [message]}
+        if "centers" in content:
+            return {"messages": [message], "image_path": content["screenshot"], "box_centers": content["centers"]}
+        else:
+            return {"messages": [message], "image_path": content["screenshot"]}
     return {"messages": []}
 
 
-g = StateGraph(MessagesState)
+g = StateGraph(AgentState)
 g.add_node("assistant", assistant_node)
 g.add_node("tools", tools_node)
 g.add_node("attach_image", attach_image_node)
@@ -40,10 +43,10 @@ g.add_edge("attach_image", "assistant")
 graph = g.compile()
 
 
-task_prompt = "Go to https://www.google.com"
+task_prompt = "Go to https://www.google.com then go to gmail"
 task_msg = task_msg_template.format_messages(task_instructions=task_prompt)
 
-response = graph.invoke({"messages": [system_msg, *task_msg]})
+response = graph.invoke({"messages": [system_msg, *task_msg], "image_path": "", "box_centers": []})
 for m in response["messages"]:
     if has_image_string(m):
         m = drop_image_string(m)
