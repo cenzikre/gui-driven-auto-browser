@@ -2,6 +2,12 @@ from pydantic import BaseModel
 from typing import Optional, Literal
 
 
+# Common API
+class CommonResponse(BaseModel):
+    status: Literal["success", "error"]
+    data: Optional[dict] = None
+    error: Optional[dict] = None
+
 # YOLO API
 class IconDetectRequest(BaseModel):
     source: str
