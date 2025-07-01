@@ -42,6 +42,7 @@ environment.yaml
 version_check.py
 model_weights/
 task_prompt.py
+web_resources/
 
 # Notebook
 *.ipynb
