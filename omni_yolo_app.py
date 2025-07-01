@@ -1,13 +1,13 @@
-import uvicorn, gc, torch, requests, base64
+import uvicorn, gc, torch, requests, base64, httpx
 import numpy as np
 import supervision as sv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, JSONResponse
 from ultralytics import YOLO
 from PIL import Image
 from pathlib import Path
 from util.image_utils import classify_image_string, encode_image_to_base64
 from util.omni_utils import BoxAnnotator, get_xyxy_box_center
-from util.api_models import IconDetectRequest, IconDetectResponse
+from util.api_models import IconDetectRequest, IconDetectResponse, CommonResponse
 from dotenv import load_dotenv
 from io import BytesIO
 
@@ -51,7 +51,7 @@ class YOLOModelSingleton:
 yolo_singleton = YOLOModelSingleton()
 
 
-def load_image(source: str) -> tuple[Image.Image, np.ndarray]:
+async def load_image(source: str) -> tuple[Image.Image, np.ndarray]:
     print("start loading image")
 
     image_type = classify_image_string(source)
@@ -60,9 +60,10 @@ def load_image(source: str) -> tuple[Image.Image, np.ndarray]:
     try:
         if image_type == "url":
             # Handle URL
-            response = requests.get(source)
-            response.raise_for_status()  # Raise an exception for bad status codes
-            image = Image.open(BytesIO(response.content))
+            async with httpx.AsyncClient() as client:
+                response = await client.get(source)
+                response.raise_for_status()  # Raise an exception for bad status codes
+                image = Image.open(BytesIO(response.content))
         elif image_type == "base64":
             # Handle base64 string
             image_data = base64.b64decode(source)
@@ -88,8 +89,10 @@ def load_image(source: str) -> tuple[Image.Image, np.ndarray]:
         image_arr = np.asarray(image)
         return image, image_arr
     
-    except requests.RequestException as e:
-        raise Exception(f"Error fetching image from URL: {str(e)}")
+    except httpx.RequestError as e:
+        raise Exception(f"Network error fetching image from URL: {str(e)}")
+    except httpx.HTTPStatusError as e:
+        raise Exception(f"Server returned error status: {str(e)}")
     except base64.binascii.Error:
         raise Exception("Invalid base64 string")
     except Exception as e:
@@ -116,9 +119,9 @@ def annotate_image(image_arr: np.ndarray, boxes: np.ndarray, draw_bbox_config: d
     return box_annotator.annotate(scene=annotated_image, detections=detections, labels=labels, image_size=(w,h))
 
 
-def detect_icon(request: IconDetectRequest) -> tuple[Image.Image, np.ndarray]:
+async def detect_icon(request: IconDetectRequest) -> tuple[Image.Image, np.ndarray]:
     try:
-        image, image_arr = load_image(request.source)
+        image, image_arr = await load_image(request.source)
         w, h = image.size
         print("image size:", w, h)
         draw_bbox_config = overlay_ratio(w)
@@ -152,21 +155,35 @@ def detect_icon(request: IconDetectRequest) -> tuple[Image.Image, np.ndarray]:
         raise Exception(f"Error in icon detection: {str(e)}")
 
 
-@app.post("/detect_icon", response_model=IconDetectResponse)
+@app.post("/detect_icon", response_model=CommonResponse)
 async def detect_icon_endpoint(request: IconDetectRequest):
-    print("request:", request)
     try:
-        annotated_image, centers = detect_icon(request)
+        annotated_image, box_centers = await detect_icon(request)
         encoded_image = encode_image_to_base64(annotated_image)
-        return IconDetectResponse(
-            centers=centers,
+        payload = IconDetectResponse(
+            centers=box_centers,
             image=encoded_image
         )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
+        return JSONResponse(
+            content={
+                "status": "success",
+                "data": payload,
+                "error": None
+            }
         )
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "data": None,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            },
+            status_code=500
+        )
+
 
 # Add periodic cleanup task
 @app.on_event("startup")
