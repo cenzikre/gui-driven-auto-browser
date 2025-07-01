@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 from pathlib import Path
-from util.api_models import GotoRequest, MoveMouseRequest, MovePathRequest, ClickRequest, GetScreenshotRequest, ScrollRequest, TypeAtRequest, WaitForLoadingRequest
+from util.api_models import GotoRequest, MoveMouseRequest, MovePathRequest, ClickRequest, GetScreenshotRequest, ScrollRequest, TypeAtRequest, WaitForLoadingRequest, CommonResponse
 from functools import wraps
 import uvicorn, asyncio, os, shutil, re, base64
 
@@ -190,7 +190,7 @@ async def clear_screenshots():
 
 # Agent Endpoints
 
-@app.post("/goto")
+@app.post("/goto", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def goto(request: GotoRequest):
@@ -199,17 +199,17 @@ async def goto(request: GotoRequest):
     return {"message": "navigated to " + request.url}
 
 
-@app.post("/take_screenshot_stream")
+@app.post("/take_screenshot_stream", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def take_screenshot_stream(request: GetScreenshotRequest):
     global _page
     await asyncio.sleep(request.wait_time)
     screenshot_bytes = await _page.screenshot(full_page=False)
-    return {"message": "screenshot taken", "screenshot": base64.b64encode(screenshot_bytes).decode("utf-8")}
+    return {"message": "screenshot taken", "image": base64.b64encode(screenshot_bytes).decode("utf-8")}
 
 
-@app.post("/move_mouse")
+@app.post("/move_mouse", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def move_mouse(request: MoveMouseRequest):
@@ -222,7 +222,7 @@ async def move_mouse(request: MoveMouseRequest):
     return {"message": f"mouse moved to {x:.2f}, {y:.2f} with {request.step} steps"}
 
 
-@app.post("/move_mouse_path")
+@app.post("/move_mouse_path", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def move_mouse_path(request: MovePathRequest):
@@ -238,7 +238,7 @@ async def move_mouse_path(request: MovePathRequest):
     return {"message": f"Mouse moved from ({start_x:.2f},{start_y:.2f}) to ({end_x:.2f},{end_y:.2f})"}
 
 
-@app.post("/click_mouse")
+@app.post("/click_mouse", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def click_mouse(request: ClickRequest):
@@ -263,7 +263,7 @@ async def click_mouse(request: ClickRequest):
         return {"message": f"Mouse clicked at ({x:.2f},{y:.2f}), but no new page was navigated to"}
     
 
-@app.post("/scroll")
+@app.post("/scroll", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def scroll(request: ScrollRequest):
@@ -272,7 +272,7 @@ async def scroll(request: ScrollRequest):
     return {"message": f"scrolled {request.delta_x} {request.delta_y}"}
 
 
-@app.post("/type_at")
+@app.post("/type_at", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def type_at(request: TypeAtRequest):
@@ -287,7 +287,7 @@ async def type_at(request: TypeAtRequest):
     return {"message": f"typed {request.text} at {x:.2f}, {y:.2f}"}
 
 
-@app.post("/refresh_page")
+@app.post("/refresh_page", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def refresh_page():
@@ -296,7 +296,7 @@ async def refresh_page():
     return {"message": "Page successfully refreshed"}
 
 
-@app.post("/wait_for_loading")
+@app.post("/wait_for_loading", response_model=CommonResponse)
 @with_browser_lock
 @with_error_handling
 async def wait_for_loading(request: WaitForLoadingRequest):
