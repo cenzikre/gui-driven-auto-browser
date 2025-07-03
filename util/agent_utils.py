@@ -306,6 +306,9 @@ async def execute_batch_actions(
                         "box_index": 1
                     }
                 },
+                {
+                    "endpoint_name": "refresh_page"
+                }
             ]
 
         state (AgentState): the state of the agent, it will be injected to the tool, do not need to pass it in the tool call
@@ -325,7 +328,9 @@ async def execute_batch_actions(
     saw_screenshot = False
 
     for i, action in enumerate(actions):
-        ep, params = action["endpoint_name"], action["params"]
+        ep, params = action["endpoint_name"], action.get("params", {})
+        if ep in ["refresh_page"]:
+            params = None
 
         # resolve box_index to x, y
         if "box_index" in params:
