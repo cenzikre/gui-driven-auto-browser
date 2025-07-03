@@ -1,7 +1,8 @@
 import uvicorn, gc, torch, requests, base64, httpx
 import numpy as np
 import supervision as sv
-from fastapi import FastAPI, JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from ultralytics import YOLO
 from PIL import Image
 from pathlib import Path
@@ -11,6 +12,8 @@ from util.api_models import IconDetectRequest, IconDetectResponse, CommonRespons
 from dotenv import load_dotenv
 from io import BytesIO
 
+# import os
+# print("Saving PNG to", os.getcwd())
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -55,6 +58,7 @@ async def load_image(source: str) -> tuple[Image.Image, np.ndarray]:
     print("start loading image")
 
     image_type = classify_image_string(source)
+    # print(image_type)
     print("input image type:", image_type)
 
     try:
@@ -159,6 +163,7 @@ async def detect_icon(request: IconDetectRequest) -> tuple[Image.Image, np.ndarr
 async def detect_icon_endpoint(request: IconDetectRequest):
     try:
         annotated_image, box_centers = await detect_icon(request)
+        # annotated_image.save('test_annotated_image.png')
         encoded_image = encode_image_to_base64(annotated_image)
         payload = IconDetectResponse(
             centers=box_centers,
@@ -167,7 +172,7 @@ async def detect_icon_endpoint(request: IconDetectRequest):
         return JSONResponse(
             content={
                 "status": "success",
-                "data": payload,
+                "data": payload.model_dump(),
                 "error": None
             }
         )
