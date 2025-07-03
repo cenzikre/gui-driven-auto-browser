@@ -305,9 +305,6 @@ async def execute_batch_actions(
                     "params": {
                         "box_index": 1
                     }
-                },
-                {
-                    "endpoint_name": "refresh_page"
                 }
             ]
 
@@ -382,4 +379,70 @@ async def execute_batch_actions(
 
 
 
+async def test_execute_batch_actions(
+    actions: list[dict], 
+    state: Annotated[AgentState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+):
+ 
+    actions = organize_actions(actions)
+    print(actions)
+    cur_centers = state.get("centers", [])
+
+    log: dict[str, Any] = {}
+    new_state: dict[str, Any] = {}
+    saw_screenshot = False
+
+    for i, action in enumerate(actions):
+        ep, params = action["endpoint_name"], action.get("params", {})
+        if ep in ["refresh_page"]:
+            params = None
+
+        # resolve box_index to x, y
+        if "box_index" in params:
+            idx = params.pop("box_index")
+            if idx < 0 or idx >= len(cur_centers):
+                raise ValueError(f"box_index {idx} out of range, please pick the box with valid index from the previous screenshot")
+            params |= {"x": cur_centers[idx][0], "y": cur_centers[idx][1]}
+
+        # call the browser api endpoint
+        print(ep, params)
+        resp = await get_api_response(browser_api_url, ep, params)
+
+        # if screenshot, run YOLO and cache big blobs only in state
+        if 'image' in resp:
+            saw_screenshot = True
+            det = await get_api_response(
+                yolo_api_url,
+                "detect_icon",
+                IconDetectRequest(source = resp['image']).model_dump()
+            )
+
+            new_state['centers'] = det['centers']
+            new_state['image'] = det['image']
+            resp.pop('image', None)
+
+        # add human readable info to tool call log
+        log[f"action_{i}"] = resp
+
+    # if no screenshot, clear the image and centers from previous state
+    if not saw_screenshot:
+        new_state['image'] = None
+        new_state['centers'] = None
+
+    # wrap the whole log into a single tool message
+    tool_msg = ToolMessage(
+        content=json.dumps(log, indent=2, ensure_ascii=False),
+        tool_call_id=tool_call_id
+    )
+
+    # return a command to merge 'new_state' and append 'tool_msg'
+
+    update={
+        **new_state,
+        'messages': [str(tool_msg)]
+    }
+
+    with open('test/test_tool_update.json', 'w') as f:
+        json.dump(update, f, indent=2)
 
