@@ -46,3 +46,10 @@ web_resources/
 
 # Notebook
 *.ipynb
+
+# Images
+*.png
+*.jpg
+
+# Data
+*.json
