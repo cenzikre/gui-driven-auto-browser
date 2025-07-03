@@ -1,4 +1,4 @@
-import json
+import asyncio
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import ToolMessage, HumanMessage
@@ -6,7 +6,6 @@ from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import tools_condition, ToolNode
 from util.agent_utils import execute_batch_actions, task_msg_template, system_msg, drop_image_string, has_image_string
 from util.agent_utils import openai_image_payload_format, AgentState
-from util.image_utils import encode_image_to_base64
 from task_prompt import task_prompt
 
 load_dotenv()
@@ -40,11 +39,18 @@ g.add_edge("attach_image", "assistant")
 graph = g.compile()
 
 
-task_msg = task_msg_template.format_messages(task_instructions=task_prompt)
+async def main():
+    task_msg = task_msg_template.format_messages(task_instructions=task_prompt)
+    response = await graph.ainvoke({
+        "messages": [system_msg, *task_msg], 
+        "image": None, 
+        "centers": None
+    })
+    for m in response["messages"]:
+        if has_image_string(m):
+            m = drop_image_string(m)
+        m.pretty_print()
 
-response = graph.invoke({"messages": [system_msg, *task_msg], "image": None, "centers": None})
-for m in response["messages"]:
-    if has_image_string(m):
-        m = drop_image_string(m)
-    m.pretty_print()
+if __name__ == "__main__":
+    asyncio.run(main())
 

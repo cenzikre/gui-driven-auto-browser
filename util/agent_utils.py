@@ -49,12 +49,15 @@ You can use these indexes to specify where to type, click, or move the mouse.
 ### 🔁 How to Act
 
 1. Observe the screenshot and the list of interactable elements.
-2. Decide your next move toward completing the task.
-3. Plan a batch of actions:
+2. Try to avoid leaving the target section or elements at the edge of the screen by scrolling.
+3. Decide your next move toward completing the task.
+4. Plan a batch of actions:
    - Use `type_at` to fill all necessary fields in one batch.
    - Follow up with `click_mouse` or `goto` if needed, placing them at the end.
-4. Wait for the new screenshot after your batch to determine your next step.
-5. Repeat until the task is complete.
+   - You can have multiple `type_at` actions in one batch, but only one other action (e.g. `click_mouse`, `goto`) in one batch,
+     since `type_at` does not change the state of the page, but others might.
+5. Wait for the new screenshot after your batch to determine your next step.
+6. Repeat until the task is complete.
 """)
 
 task_msg_template = ChatPromptTemplate.from_template("""
@@ -69,6 +72,8 @@ For every response, beside answering directly question, and generating tool call
         - What you think about the observation, and how you plan for the following actions to complete the task
     Action:
         - What you want to do for the next step
+                                                     
+Remember you can only make ONE TOOL CALL PER TURN, so if you want to make multiple actions, you need to plan them in one batch.
 """)
 
 
@@ -330,7 +335,7 @@ async def execute_batch_actions(
             params = None
 
         # resolve box_index to x, y
-        if "box_index" in params:
+        if params is not None and "box_index" in params:
             idx = params.pop("box_index")
             if idx < 0 or idx >= len(cur_centers):
                 raise ValueError(f"box_index {idx} out of range, please pick the box with valid index from the previous screenshot")
