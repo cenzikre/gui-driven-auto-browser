@@ -1,13 +1,14 @@
-import requests, base64, io
+import requests, base64, io, httpx, json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 from typing_extensions import TypedDict
 from PIL import Image
 from util.api_models import IconDetectRequest
-from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, AnyMessage
+from langchain_core.tools import tool, InjectedToolCallId
+from langchain_core.messages import SystemMessage, AnyMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.prebuilt.tool_node import InjectedState
+from langgraph.types import Command
 
 
 root = Path(__file__).parent.parent
@@ -16,31 +17,47 @@ browser_api_url = "http://127.0.0.1:8000"
 yolo_api_url = "http://127.0.0.1:8001"
 
 system_msg = SystemMessage(content="""
-You are a helpful assistant that help human with browser automation tasks. 
-You are going to be given a task instructions related to web page interactions, e.g.
-    - go to a specific website
-    - search for some information or content
-    - looking for specific items on a shopping website
-    - login to account to summarize information, or make a payment
-    - etc.
+You are a helpful assistant that helps a human complete tasks by interacting with a real web browser.
 
-Through a set of tools provided to you, you can interact with a web browser to:
-    - navigate to a specific url
-    - see the browser viewport by taking screenshots
-    - interactable elements in the screenshots will be annotated with bounding boxes and indexes, 
-      and you can pick the index of the element you want to interact with by their indexes
-                           
-Then based on what you see, you can:
-    - move the mouse to a specific interactive box
-    - click the mouse at a specific interactive box
-    - scroll the mouse horizontally and vertically
-    - type text at a specific interactive box
+You will receive instructions related to web interactions, such as:
+- Navigating to a website
+- Searching for content or information
+- Filling out forms (e.g., login, checkout, payments)
+- Clicking buttons or links
+- Reviewing or summarizing page content
 
-1 second after executing an action, a auto screenshot of the browser viewport will be taken to try to capture the effect of your action.
-You can also manually set wait time and take screenshot if the auto screenshot is showing loading web page.
-Interactable elements in the screenshots will be annotated with bounding boxes and indexes.
-Based on the information, you can plan your next move. 
-Repeat the process until the task is completed.
+You can interact with the browser using a set of tools that allow you to:
+- Navigate to a specific URL
+- Move the mouse to an interactive element
+- Click on an interactive element
+- Scroll the page
+- Type text into input fields
+
+The browser will provide a screenshot of the current page, where **interactable elements** are annotated with bounding boxes and **indexed** for reference. 
+You can use these indexes to specify where to type, click, or move the mouse.
+
+### 💡 Action Planning Rules (Batch Execution Model):
+
+- You must respond with a **batch of actions** based on what you see and the current task goal.
+- You can include any number of **parallelizable actions**:
+  - `type_at`: fill text into multiple input boxes simultaneously
+- You may include **at most one non-parallelizable action**, and it must appear at the **end** of the batch:
+  - Non-parallelizable actions: `goto`, `click_mouse`, `scroll`, `refresh_page`, `wait`
+
+> ⚠️ Do **not** call the screenshot tool yourself. A screenshot will be taken **automatically after your batch of actions finishes.**
+
+### 🔁 How to Act
+
+1. Observe the screenshot and the list of interactable elements.
+2. Try to avoid leaving the target section or elements at the edge of the screen by scrolling.
+3. Decide your next move toward completing the task.
+4. Plan a batch of actions:
+   - Use `type_at` to fill all necessary fields in one batch.
+   - Follow up with `click_mouse` or `goto` if needed, placing them at the end.
+   - You can have multiple `type_at` actions in one batch, but only one other action (e.g. `click_mouse`, `goto`) in one batch,
+     since `type_at` does not change the state of the page, but others might.
+5. Wait for the new screenshot after your batch to determine your next step.
+6. Repeat until the task is complete.
 """)
 
 task_msg_template = ChatPromptTemplate.from_template("""
@@ -55,6 +72,8 @@ For every response, beside answering directly question, and generating tool call
         - What you think about the observation, and how you plan for the following actions to complete the task
     Action:
         - What you want to do for the next step
+                                                     
+Remember you can only make ONE TOOL CALL PER TURN, so if you want to make multiple actions, you need to plan them in one batch.
 """)
 
 
@@ -104,8 +123,8 @@ def call_action_endpoint_function(endpoint_name: str, **kwargs) -> list[dict]:
 
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], image_reducer]
-    image_path: str = ""
-    box_centers: list[list[float]] = []
+    image: str | None = None
+    centers: list[list[float]] | None = None
 
 
 @tool
@@ -178,8 +197,257 @@ def call_action_endpoint(endpoint_name: str, params: dict, state: Annotated[Agen
     return response_json
 
 
+def organize_actions(actions: list[dict]) -> list[dict]:
+    """
+    Reorganize the actions into a list of parallelizable actions + 1 * non-parallelizable actions + 1 * take_screenshot action;
+    Parallelizable actions: `type_at`
+    Non-parallelizable actions: `goto`, `click_mouse`, `scroll`, `refresh_page`, `wait_for_loading`
+
+    Args:
+        actions (list[dict]): the list of actions to organize
+    
+    Returns:
+        list[dict]: the list of actions to execute
+    """
+    parallelizable_action_list = ['type_at']
+    non_parallelizable_action_count = 0
+    parallelizable_actions = []
+    non_parallelizable_actions = []
+
+    for action in actions:
+        if action["endpoint_name"] in parallelizable_action_list:
+            parallelizable_actions.append(action)
+        else:
+            non_parallelizable_action_count += 1
+            if non_parallelizable_action_count > 1:
+                raise ValueError("Only one non-parallelizable action is allowed")
+            non_parallelizable_actions.append(action)
+
+    return parallelizable_actions + non_parallelizable_actions + [{"endpoint_name": "take_screenshot_stream"}]
+
+
+async def get_api_response(api_url: str, endpoint: str, payload: dict) -> dict:
+    async with httpx.AsyncClient() as client:
+        # Make POST request
+        try:
+            resp = await client.post(f"{api_url}/{endpoint}", json=payload)
+        except httpx.RequestError as e:
+            # network level error, cannot reach the server
+            raise RuntimeError(f"Cound not reach the server: {e}") from e
+        
+        # Decode the response body
+        try:
+            data = resp.json()
+        except Exception as e:
+            raise ValueError(f"Invalid JSON in response: {e}")
+        
+        # Check if api returns handled error
+        if data.get("status") == "error":
+            error = data.get("error", {})
+            raise RuntimeError(f"API error from {endpoint}: {error.get('type', 'Unknown')} - {error.get('message', 'No details')}")
+        
+        # Return valid response body
+        return data['data']
+
+
+@tool
+async def execute_batch_actions(
+    actions: list[dict], 
+    state: Annotated[AgentState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """
+    Call this tool to sequentially execute the actions you provided;
+    Action batch: N * parallelizable actions + 1 * non-parallelizable action (at the end);
+
+    Parallelizable actions: `type_at`
+    Non-parallelizable actions: `goto`, `click_mouse`, `scroll`, `refresh_page`, `wait_for_loading`
+    
+    Requested actions will be executed one by one and a screenshot will be taken at the end of all actions.
+    The tool will automatically analyze it with an icon-detection model (YOLO), and store the detection results (the annotated
+    image and box coordinates) in the agent's state for use in the next turn.
+
+    If no screenshot is returned by any action in the batch, the agent's previous `image` and `centers` fields will be cleared 
+    (set to `None`) to avoid carrying stale information forward.
+    
+    Args:
+        actions (list[dict]): A list of actions to execute, each action is a dictionary with the following keys:
+            - endpoint_name (str): the name of the browser API endpoint
+            - params (dict): the parameters for that endpoint
+
+                Available endpoints and their expected parameters include:
+
+                - goto: navigate to a specific url
+                    url (str): target URL
+
+                - click_mouse: click the mouse at a specific annotated box
+                    box_index (int): the index of the annotated box to click the mouse on
+
+                - scroll: scroll the mouse horizontally and vertically
+                    delta_x (float): scroll offset horizontally
+                    delta_y (float): scroll offset vertically
+
+                - refresh_page: refresh the current page (no parameters)
+
+                - wait_for_loading: wait for the page to finish loading
+                    wait_state (str, default "domcontentloaded"): event to wait for, can be "domcontentloaded", "load", "networkidle"
+                    timeout (float, default 30000): maximum wait time in milliseconds
+
+                - type_at: type text at a specific annotated box
+                    box_index (int): the index of the annotated box to type the text at
+                    text (str): the text content to type
+
+            Example: [
+                {
+                    "endpoint_name": "type_at",
+                    "params": {
+                        "box_index": 0,
+                        "text": "Hello, world!"
+                    }
+                },
+                {
+                    "endpoint_name": "click_mouse",
+                    "params": {
+                        "box_index": 1
+                    }
+                }
+            ]
+
+        state (AgentState): the state of the agent, it will be injected to the tool, do not need to pass it in the tool call
+        tool_call_id (str): the id of the tool call, it will be injected to the tool, do not need to pass it in the tool call
+    
+    Returns:
+        Command: contains an update with:
+        - a new tool message summarizing the action responses
+        - the most recent annotated screenshot and detected box centers, or None if no screenshot was taken
+    """
+
+    actions = organize_actions(actions)
+    cur_centers = state.get("centers", [])
+
+    log: dict[str, Any] = {}
+    new_state: dict[str, Any] = {}
+    saw_screenshot = False
+
+    for i, action in enumerate(actions):
+        ep, params = action["endpoint_name"], action.get("params", {})
+        if ep in ["refresh_page"]:
+            params = None
+
+        # resolve box_index to x, y
+        if params is not None and "box_index" in params:
+            idx = params.pop("box_index")
+            if idx < 0 or idx >= len(cur_centers):
+                raise ValueError(f"box_index {idx} out of range, please pick the box with valid index from the previous screenshot")
+            params |= {"x": cur_centers[idx][0], "y": cur_centers[idx][1]}
+
+        # call the browser api endpoint
+        resp = await get_api_response(browser_api_url, ep, params)
+
+        # if screenshot, run YOLO and cache big blobs only in state
+        if 'image' in resp:
+            saw_screenshot = True
+            det = await get_api_response(
+                yolo_api_url,
+                "detect_icon",
+                IconDetectRequest(source = resp['image']).model_dump()
+            )
+
+            new_state['centers'] = det['centers']
+            new_state['image'] = det['image']
+            resp.pop('image', None)
+
+        # add human readable info to tool call log
+        log[f"action_{i}"] = resp
+
+    # if no screenshot, clear the image and centers from previous state
+    if not saw_screenshot:
+        new_state['image'] = None
+        new_state['centers'] = None
+
+    # wrap the whole log into a single tool message
+    tool_msg = ToolMessage(
+        content=json.dumps(log, indent=2, ensure_ascii=False),
+        tool_call_id=tool_call_id
+    )
+
+    # return a command to merge 'new_state' and append 'tool_msg'
+    return Command(
+        update={
+            **new_state,
+            'messages': [tool_msg]
+        }
+    )
 
 
 
 
+
+
+async def test_execute_batch_actions(
+    actions: list[dict], 
+    state: Annotated[AgentState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+):
+ 
+    actions = organize_actions(actions)
+    print(actions)
+    cur_centers = state.get("centers", [])
+
+    log: dict[str, Any] = {}
+    new_state: dict[str, Any] = {}
+    saw_screenshot = False
+
+    for i, action in enumerate(actions):
+        ep, params = action["endpoint_name"], action.get("params", {})
+        if ep in ["refresh_page"]:
+            params = None
+
+        # resolve box_index to x, y
+        if "box_index" in params:
+            idx = params.pop("box_index")
+            if idx < 0 or idx >= len(cur_centers):
+                raise ValueError(f"box_index {idx} out of range, please pick the box with valid index from the previous screenshot")
+            params |= {"x": cur_centers[idx][0], "y": cur_centers[idx][1]}
+
+        # call the browser api endpoint
+        print(ep, params)
+        resp = await get_api_response(browser_api_url, ep, params)
+
+        # if screenshot, run YOLO and cache big blobs only in state
+        if 'image' in resp:
+            saw_screenshot = True
+            det = await get_api_response(
+                yolo_api_url,
+                "detect_icon",
+                IconDetectRequest(source = resp['image']).model_dump()
+            )
+
+            new_state['centers'] = det['centers']
+            new_state['image'] = det['image']
+            resp.pop('image', None)
+
+        # add human readable info to tool call log
+        log[f"action_{i}"] = resp
+
+    # if no screenshot, clear the image and centers from previous state
+    if not saw_screenshot:
+        new_state['image'] = None
+        new_state['centers'] = None
+
+    # wrap the whole log into a single tool message
+    tool_msg = ToolMessage(
+        content=json.dumps(log, indent=2, ensure_ascii=False),
+        tool_call_id=tool_call_id
+    )
+
+    # return a command to merge 'new_state' and append 'tool_msg'
+
+    update={
+        **new_state,
+        'messages': [str(tool_msg)]
+    }
+
+    with open('test/test_tool_update.json', 'w') as f:
+        json.dump(update, f, indent=2)
 

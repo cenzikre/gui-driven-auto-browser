@@ -1,6 +1,12 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 
+
+# Common API
+class CommonResponse(BaseModel):
+    status: Literal["success", "error"]
+    data: Optional[dict] = None
+    error: Optional[dict] = None
 
 # YOLO API
 class IconDetectRequest(BaseModel):
@@ -43,3 +49,7 @@ class TypeAtRequest(BaseModel):
     x: float
     y: float
     text: str
+
+class WaitForLoadingRequest(BaseModel):
+    wait_state: Literal["domcontentloaded", "networkidle", "load"] = "domcontentloaded"
+    timeout: int = 30000
